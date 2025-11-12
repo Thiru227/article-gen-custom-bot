@@ -14,24 +14,18 @@ app = Flask(__name__)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 WEBHOOK_URL = os.environ.get('WEBHOOK_URL')  # Your render.com URL
 
-# AI Provider Keys - Add multiple keys for each provider
+# AI Provider Keys - Using current 2025 models
 AI_PROVIDERS = {
     'gemini': {
         'keys': os.environ.get('GEMINI_KEYS', '').split(','),
-        'endpoint': 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent',  # v1 instead of v1beta
+        'endpoint': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
         'active': True
     },
     'openrouter': {
         'keys': os.environ.get('OPENROUTER_KEYS', '').split(','),
         'endpoint': 'https://openrouter.ai/api/v1/chat/completions',
-        'model': 'google/gemini-flash-1.5',
+        'model': 'google/gemini-2.5-flash',
         'active': True
-    },
-    'groq': {
-        'keys': os.environ.get('GROQ_KEYS', '').split(','),
-        'endpoint': 'https://api.groq.com/openai/v1/chat/completions',
-        'model': 'llama-3.2-90b-text-preview',  # Using text model with OCR approach
-        'active': False  # Disabled since Groq deprecated vision models
     }
 }
 
@@ -94,7 +88,7 @@ def image_to_base64(image_bytes):
         return None
 
 def call_gemini(base64_image, api_key):
-    """Call Gemini API with v1 endpoint"""
+    """Call Gemini 2.5 Flash API"""
     url = f"{AI_PROVIDERS['gemini']['endpoint']}?key={api_key}"
     
     prompt = """Analyze this event poster and extract all information in a well-formatted article.
@@ -142,18 +136,18 @@ Extract ALL text accurately. If information is missing, omit that section. Keep 
         result = response.json()
         return result['candidates'][0]['content']['parts'][0]['text']
     else:
-        print(f"Gemini response: {response.text}")
-        raise Exception(f"Gemini API error: {response.status_code} - {response.text}")
+        print(f"Gemini full response: {response.text}")
+        raise Exception(f"Gemini API error: {response.status_code}")
 
 def call_openrouter(base64_image, api_key):
-    """Call OpenRouter API"""
+    """Call OpenRouter with Gemini 2.5 Flash"""
     url = AI_PROVIDERS['openrouter']['endpoint']
     
     headers = {
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://your-app.com',  # Optional but recommended
-        'X-Title': 'Event Poster Bot'  # Optional but recommended
+        'HTTP-Referer': os.environ.get('WEBHOOK_URL', 'https://github.com'),
+        'X-Title': 'Event Poster Bot'
     }
     
     prompt = """Analyze this event poster and extract all information in a well-formatted article.
@@ -203,23 +197,17 @@ Extract ALL text accurately. If information is missing, omit that section. Keep 
         result = response.json()
         return result['choices'][0]['message']['content']
     else:
-        print(f"OpenRouter response: {response.text}")
-        raise Exception(f"OpenRouter API error: {response.status_code} - {response.text}")
-
-def call_groq(base64_image, api_key):
-    """Call Groq API - DEPRECATED, keeping for future use"""
-    # Groq has deprecated all vision models as of Nov 2024
-    # This function is kept for reference but not used
-    raise Exception("Groq vision models are deprecated")
+        print(f"OpenRouter full response: {response.text}")
+        raise Exception(f"OpenRouter API error: {response.status_code}")
 
 def extract_event_info(base64_image):
     """Try multiple AI providers with multiple keys"""
-    providers_order = ['gemini', 'openrouter']  # Removed groq due to deprecation
+    providers_order = ['gemini', 'openrouter']
     
     for provider_name in providers_order:
         provider = AI_PROVIDERS[provider_name]
         if not provider['active']:
-            print(f"Skipping {provider_name} - disabled")
+            print(f"⊘ Skipping {provider_name} - disabled")
             continue
             
         for api_key in provider['keys']:
@@ -227,22 +215,23 @@ def extract_event_info(base64_image):
                 continue
                 
             try:
-                print(f"Trying {provider_name} with key ending in ...{api_key[-4:]}")
+                print(f"→ Trying {provider_name} with key ending in ...{api_key[-4:]}")
                 
                 if provider_name == 'gemini':
                     result = call_gemini(base64_image, api_key)
                 elif provider_name == 'openrouter':
                     result = call_openrouter(base64_image, api_key)
                 
-                print(f"✓ Success with {provider_name}")
+                print(f"✓ SUCCESS with {provider_name}!")
                 return result
                 
             except Exception as e:
-                print(f"✗ Failed with {provider_name}: {e}")
+                error_msg = str(e)
+                print(f"✗ Failed with {provider_name}: {error_msg[:200]}")
                 failed_keys[provider_name].add(api_key)
                 continue
     
-    raise Exception("❌ All AI providers failed. Please verify:\n1. API keys are valid\n2. You have credits/quota remaining\n3. Keys are properly set in environment variables")
+    raise Exception("❌ All AI providers failed.\n\n**Please check:**\n1. API keys are valid and active\n2. You have remaining quota/credits\n3. Environment variables are set correctly\n\n**Get a FREE Gemini key:** https://aistudio.google.com/apikey")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -260,39 +249,48 @@ def webhook():
         if 'text' in message and message['text'] == '/start':
             welcome_text = """👋 *Welcome to Event Poster to Article Bot!*
 
-Send me an event poster (image or PDF) and I'll convert it into a well-formatted article.
+🤖 *Powered by:* Google Gemini 2.5 Flash
 
 *How to use:*
-• Send a clear photo of the event poster
-• Or send a PDF file
-• Wait a few seconds for processing
+1️⃣ Send a clear photo of an event poster
+2️⃣ Or upload a PDF file
+3️⃣ Wait a few seconds for AI processing
+4️⃣ Receive a formatted article!
 
-*Powered by:* Google Gemini AI
+*Features:*
+✓ Extracts all text from posters
+✓ Formats into professional article
+✓ Identifies dates, venues, speakers
+✓ Fast processing (3-5 seconds)
 
-Just send the image/PDF to get started! 🚀"""
+Just send an image to get started! 🚀"""
             send_telegram_message(chat_id, welcome_text)
             return jsonify({'ok': True})
         
         # Handle /help command
         if 'text' in message and message['text'] == '/help':
-            help_text = """*Event Poster Bot Help* 📚
+            help_text = """*📚 Help & Tips*
 
-*How it works:*
-1️⃣ Send a clear photo of an event poster
-2️⃣ Or upload a PDF file containing the poster
-3️⃣ The bot extracts all information and formats it as an article
+*Supported Formats:*
+• JPEG/PNG images ✓
+• PDF documents (first page) ✓
+• File size: up to 20MB
 
-*Tips for best results:*
+*For Best Results:*
 • Use clear, well-lit photos
 • Ensure all text is readable
-• Avoid blurry or distorted images
-• PDF should be under 10MB
+• Avoid blur or distortion
+• High resolution recommended
 
-*Supported formats:*
-✓ JPEG/PNG images
-✓ PDF documents (first page only)
+*Commands:*
+/start - Welcome message
+/help - Show this help
 
-*Issues?* Make sure your image is clear and text is visible."""
+*Need API Key?*
+Get FREE Gemini API: https://aistudio.google.com/apikey
+
+*Issues?*
+Make sure your image has visible, readable text."""
             send_telegram_message(chat_id, help_text)
             return jsonify({'ok': True})
         
@@ -300,8 +298,8 @@ Just send the image/PDF to get started! 🚀"""
         
         # Handle images
         if 'photo' in message:
-            send_telegram_message(chat_id, "📸 Processing your image... Please wait.")
-            file_id = message['photo'][-1]['file_id']  # Get highest resolution
+            send_telegram_message(chat_id, "📸 *Processing image...*\n\n⏳ Analyzing with Gemini AI...")
+            file_id = message['photo'][-1]['file_id']
             image_bytes = download_file(file_id)
             base64_image = image_to_base64(image_bytes)
             
@@ -309,19 +307,19 @@ Just send the image/PDF to get started! 🚀"""
         elif 'document' in message:
             doc = message['document']
             if doc.get('mime_type') == 'application/pdf':
-                send_telegram_message(chat_id, "📄 Processing your PDF... This may take a moment.")
+                send_telegram_message(chat_id, "📄 *Processing PDF...*\n\n⏳ Converting and analyzing...")
                 file_id = doc['file_id']
                 pdf_bytes = download_file(file_id)
                 base64_image = pdf_to_images(pdf_bytes)
                 
                 if not base64_image:
-                    send_telegram_message(chat_id, "❌ Failed to convert PDF. Please try:\n• Sending it as an image instead\n• Making sure PDF is not corrupted\n• Using a clearer PDF")
+                    send_telegram_message(chat_id, "❌ *PDF conversion failed*\n\nPlease try:\n• Sending as image instead\n• Using a different PDF\n• Checking file isn't corrupted")
                     return jsonify({'ok': True})
             else:
-                send_telegram_message(chat_id, "⚠️ Please send an *image* (JPEG/PNG) or *PDF* file.")
+                send_telegram_message(chat_id, "⚠️ Unsupported file type.\n\nPlease send:\n• Image (JPEG/PNG)\n• PDF document")
                 return jsonify({'ok': True})
         else:
-            send_telegram_message(chat_id, "⚠️ Please send an event poster:\n• As an image (photo)\n• As a PDF document\n\nUse /help for more info.")
+            send_telegram_message(chat_id, "⚠️ *No image detected*\n\nPlease send:\n• A photo of the event poster\n• Or a PDF file\n\nUse /help for more info.")
             return jsonify({'ok': True})
         
         # Extract event information
@@ -329,16 +327,16 @@ Just send the image/PDF to get started! 🚀"""
             try:
                 article = extract_event_info(base64_image)
                 send_telegram_message(chat_id, article)
-                send_telegram_message(chat_id, "✅ *Article generated successfully!*\n\nNeed another? Just send another poster!")
+                send_telegram_message(chat_id, "\n✅ *Article generated successfully!*\n\n📤 Copy and use as needed.\n💡 Send another poster anytime!")
             except Exception as e:
-                error_msg = f"❌ *Error processing image*\n\n{str(e)}\n\nPlease try:\n• Using a clearer image\n• Checking if text is readable\n• Verifying your API quota"
+                error_msg = f"❌ *Processing Error*\n\n{str(e)}\n\n*Troubleshooting:*\n• Verify API keys are valid\n• Check quota/credits remaining\n• Try a clearer image\n• Contact support if issue persists"
                 send_telegram_message(chat_id, error_msg)
-                print(f"Processing error: {e}")
+                print(f"ERROR: {e}")
         
         return jsonify({'ok': True})
         
     except Exception as e:
-        print(f"Webhook error: {e}")
+        print(f"Webhook critical error: {e}")
         return jsonify({'ok': True})
 
 @app.route('/set_webhook', methods=['GET'])
@@ -351,7 +349,7 @@ def set_webhook():
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint for monitoring and cron jobs"""
+    """Health check endpoint"""
     active_providers = {k: v['active'] for k, v in AI_PROVIDERS.items() if v['active']}
     key_counts = {k: len([key for key in v['keys'] if key and key.strip()]) 
                   for k, v in AI_PROVIDERS.items() if v['active']}
@@ -359,45 +357,103 @@ def health():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
+        'bot_token': 'configured' if TELEGRAM_BOT_TOKEN else 'missing',
+        'webhook_url': 'configured' if WEBHOOK_URL else 'missing',
         'providers': active_providers,
-        'valid_keys': key_counts
+        'valid_keys': key_counts,
+        'model': 'gemini-2.5-flash'
     }), 200
 
 @app.route('/ping', methods=['GET'])
 def ping():
-    """Simple ping endpoint to keep app awake"""
+    """Ping endpoint to keep app awake"""
     return jsonify({'status': 'ok', 'time': datetime.utcnow().isoformat()}), 200
 
 @app.route('/keepalive', methods=['GET'])
 def keepalive():
-    """Keep-alive endpoint for cron jobs (prevents Render sleep)"""
+    """Keep-alive for cron jobs"""
     return "OK", 200
 
 @app.route('/', methods=['GET'])
 def home():
     """Home endpoint"""
-    active_providers = [k for k, v in AI_PROVIDERS.items() if v['active']]
+    gemini_keys = len([k for k in AI_PROVIDERS['gemini']['keys'] if k and k.strip()])
+    openrouter_keys = len([k for k in AI_PROVIDERS['openrouter']['keys'] if k and k.strip()])
+    
+    status_emoji = "✅" if gemini_keys > 0 or openrouter_keys > 0 else "⚠️"
     
     return f"""
-    <h1>🤖 Event Poster to Article Bot</h1>
-    <p><strong>Status:</strong> ✅ Running</p>
-    <p><strong>Active Providers:</strong> {', '.join(active_providers)}</p>
-    
-    <h3>Quick Links:</h3>
-    <ul>
-        <li><a href="/health">Health Check</a> - View system status</li>
-        <li><a href="/set_webhook">Set Webhook</a> - Configure Telegram webhook</li>
-    </ul>
-    
-    <h3>How to Use:</h3>
-    <ol>
-        <li>Open Telegram and find your bot</li>
-        <li>Send /start to begin</li>
-        <li>Send an event poster image or PDF</li>
-        <li>Receive formatted article instantly!</li>
-    </ol>
-    
-    <p><em>Powered by Google Gemini AI</em></p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Event Poster Bot</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
+            h1 {{ color: #1a73e8; }}
+            .status {{ background: #e8f5e9; padding: 15px; border-radius: 8px; margin: 20px 0; }}
+            .warning {{ background: #fff3e0; }}
+            .error {{ background: #ffebee; }}
+            ul {{ line-height: 1.8; }}
+            a {{ color: #1a73e8; text-decoration: none; }}
+            a:hover {{ text-decoration: underline; }}
+            .key-setup {{ background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0; }}
+            code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }}
+        </style>
+    </head>
+    <body>
+        <h1>🤖 Event Poster to Article Bot</h1>
+        
+        <div class="status {'warning' if gemini_keys == 0 else ''}">
+            <h3>{status_emoji} Status</h3>
+            <ul>
+                <li><strong>Service:</strong> Running</li>
+                <li><strong>Model:</strong> Google Gemini 2.5 Flash</li>
+                <li><strong>Gemini Keys:</strong> {gemini_keys} configured</li>
+                <li><strong>OpenRouter Keys:</strong> {openrouter_keys} configured</li>
+                <li><strong>Bot Token:</strong> {'✓ Configured' if TELEGRAM_BOT_TOKEN else '✗ Missing'}</li>
+                <li><strong>Webhook:</strong> {'✓ Configured' if WEBHOOK_URL else '✗ Missing'}</li>
+            </ul>
+        </div>
+        
+        {'<div class="status error"><h3>⚠️ Configuration Issue</h3><p>No API keys found! Please add at least one Gemini or OpenRouter API key.</p></div>' if gemini_keys == 0 and openrouter_keys == 0 else ''}
+        
+        <h3>🔗 Quick Links</h3>
+        <ul>
+            <li><a href="/health">📊 Health Check</a> - View detailed status</li>
+            <li><a href="/set_webhook">🔧 Set Webhook</a> - Configure Telegram webhook</li>
+        </ul>
+        
+        <h3>🚀 How to Use</h3>
+        <ol>
+            <li>Open Telegram and find your bot</li>
+            <li>Send <code>/start</code> to begin</li>
+            <li>Send an event poster (image or PDF)</li>
+            <li>Receive formatted article instantly!</li>
+        </ol>
+        
+        <div class="key-setup">
+            <h3>🔑 Need API Keys?</h3>
+            <p><strong>Gemini API (FREE):</strong></p>
+            <ol>
+                <li>Visit: <a href="https://aistudio.google.com/apikey" target="_blank">https://aistudio.google.com/apikey</a></li>
+                <li>Click "Create API Key"</li>
+                <li>Copy the key (starts with <code>AIza...</code>)</li>
+                <li>Set environment variable: <code>GEMINI_KEYS=your_key_here</code></li>
+            </ol>
+            
+            <p><strong>OpenRouter (Paid backup):</strong></p>
+            <ol>
+                <li>Visit: <a href="https://openrouter.ai/keys" target="_blank">https://openrouter.ai/keys</a></li>
+                <li>Sign up and add credits ($5 minimum)</li>
+                <li>Create API key</li>
+                <li>Set environment variable: <code>OPENROUTER_KEYS=your_key_here</code></li>
+            </ol>
+        </div>
+        
+        <hr>
+        <p><em>Powered by Google Gemini 2.5 Flash • Built with Flask</em></p>
+    </body>
+    </html>
     """
 
 if __name__ == '__main__':
