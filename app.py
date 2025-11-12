@@ -18,7 +18,7 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')  # Your render.com URL
 AI_PROVIDERS = {
     'gemini': {
         'keys': os.environ.get('GEMINI_KEYS', '').split(','),
-        'endpoint': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+        'endpoint': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',  # Fixed URL
         'active': True
     },
     'openrouter': {
@@ -30,7 +30,7 @@ AI_PROVIDERS = {
     'groq': {
         'keys': os.environ.get('GROQ_KEYS', '').split(','),
         'endpoint': 'https://api.groq.com/openai/v1/chat/completions',
-        'model': 'llama-3.2-90b-vision-preview',
+        'model': 'llama-3.2-11b-vision-preview',  # Changed to 11b model (90b doesn't support vision)
         'active': True
     }
 }
@@ -94,7 +94,7 @@ def image_to_base64(image_bytes):
         return None
 
 def call_gemini(base64_image, api_key):
-    """Call Gemini API"""
+    """Call Gemini API - FIXED VERSION"""
     url = f"{AI_PROVIDERS['gemini']['endpoint']}?key={api_key}"
     
     prompt = """Analyze this event poster and extract all information in a well-formatted article.
@@ -141,7 +141,9 @@ Extract ALL text accurately. If information is missing, omit that section. Keep 
     if response.status_code == 200:
         result = response.json()
         return result['candidates'][0]['content']['parts'][0]['text']
-    raise Exception(f"Gemini API error: {response.status_code}")
+    else:
+        print(f"Gemini response: {response.text}")
+        raise Exception(f"Gemini API error: {response.status_code}")
 
 def call_openrouter(base64_image, api_key):
     """Call OpenRouter API"""
@@ -198,10 +200,12 @@ Extract ALL text accurately. If information is missing, omit that section. Keep 
     if response.status_code == 200:
         result = response.json()
         return result['choices'][0]['message']['content']
-    raise Exception(f"OpenRouter API error: {response.status_code}")
+    else:
+        print(f"OpenRouter response: {response.text}")
+        raise Exception(f"OpenRouter API error: {response.status_code}")
 
 def call_groq(base64_image, api_key):
-    """Call Groq API"""
+    """Call Groq API - FIXED VERSION"""
     url = AI_PROVIDERS['groq']['endpoint']
     
     headers = {
@@ -255,7 +259,9 @@ Extract ALL text accurately. If information is missing, omit that section. Keep 
     if response.status_code == 200:
         result = response.json()
         return result['choices'][0]['message']['content']
-    raise Exception(f"Groq API error: {response.status_code}")
+    else:
+        print(f"Groq response: {response.text}")
+        raise Exception(f"Groq API error: {response.status_code}")
 
 def extract_event_info(base64_image):
     """Try multiple AI providers with multiple keys"""
@@ -267,7 +273,7 @@ def extract_event_info(base64_image):
             continue
             
         for api_key in provider['keys']:
-            if not api_key or api_key in failed_keys[provider_name]:
+            if not api_key or api_key.strip() == '' or api_key in failed_keys[provider_name]:
                 continue
                 
             try:
