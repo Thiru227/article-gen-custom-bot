@@ -18,7 +18,7 @@ WEBHOOK_URL = os.environ.get('WEBHOOK_URL')  # Your render.com URL
 AI_PROVIDERS = {
     'gemini': {
         'keys': os.environ.get('GEMINI_KEYS', '').split(','),
-        'endpoint': 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',  # Fixed URL
+        'endpoint': 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent',  # v1 instead of v1beta
         'active': True
     },
     'openrouter': {
@@ -30,8 +30,8 @@ AI_PROVIDERS = {
     'groq': {
         'keys': os.environ.get('GROQ_KEYS', '').split(','),
         'endpoint': 'https://api.groq.com/openai/v1/chat/completions',
-        'model': 'llama-3.2-11b-vision-preview',  # Changed to 11b model (90b doesn't support vision)
-        'active': True
+        'model': 'llama-3.2-90b-text-preview',  # Using text model with OCR approach
+        'active': False  # Disabled since Groq deprecated vision models
     }
 }
 
@@ -94,7 +94,7 @@ def image_to_base64(image_bytes):
         return None
 
 def call_gemini(base64_image, api_key):
-    """Call Gemini API - FIXED VERSION"""
+    """Call Gemini API with v1 endpoint"""
     url = f"{AI_PROVIDERS['gemini']['endpoint']}?key={api_key}"
     
     prompt = """Analyze this event poster and extract all information in a well-formatted article.
@@ -143,7 +143,7 @@ Extract ALL text accurately. If information is missing, omit that section. Keep 
         return result['candidates'][0]['content']['parts'][0]['text']
     else:
         print(f"Gemini response: {response.text}")
-        raise Exception(f"Gemini API error: {response.status_code}")
+        raise Exception(f"Gemini API error: {response.status_code} - {response.text}")
 
 def call_openrouter(base64_image, api_key):
     """Call OpenRouter API"""
@@ -151,7 +151,9 @@ def call_openrouter(base64_image, api_key):
     
     headers = {
         'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://your-app.com',  # Optional but recommended
+        'X-Title': 'Event Poster Bot'  # Optional but recommended
     }
     
     prompt = """Analyze this event poster and extract all information in a well-formatted article.
@@ -196,80 +198,28 @@ Extract ALL text accurately. If information is missing, omit that section. Keep 
         "max_tokens": 2048
     }
     
-    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    response = requests.post(url, headers=headers, json=payload, timeout=45)
     if response.status_code == 200:
         result = response.json()
         return result['choices'][0]['message']['content']
     else:
         print(f"OpenRouter response: {response.text}")
-        raise Exception(f"OpenRouter API error: {response.status_code}")
+        raise Exception(f"OpenRouter API error: {response.status_code} - {response.text}")
 
 def call_groq(base64_image, api_key):
-    """Call Groq API - FIXED VERSION"""
-    url = AI_PROVIDERS['groq']['endpoint']
-    
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
-    }
-    
-    prompt = """Analyze this event poster and extract all information in a well-formatted article.
-
-Structure your response as:
-# [Event Title]
-
-**Location & Date:** [Extract location and dates]
-
-[Write 2-3 paragraphs describing the event, its purpose, and significance]
-
-## Event Details:
-- **Date:** [Full dates]
-- **Time:** [Time range if available]
-- **Location:** [Venue details]
-
-## Organizers and Resource Persons:
-- **Organizer:** [Department/Institution]
-- **Resource Person(s):** [Names and designations]
-- **Convenor:** [Name and designation]
-- **Co-ordinators:** [Names and designations]
-
-Extract ALL text accurately. If information is missing, omit that section. Keep the tone professional and engaging."""
-
-    payload = {
-        "model": AI_PROVIDERS['groq']['model'],
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    }
-                ]
-            }
-        ],
-        "temperature": 0.4,
-        "max_tokens": 2048
-    }
-    
-    response = requests.post(url, headers=headers, json=payload, timeout=30)
-    if response.status_code == 200:
-        result = response.json()
-        return result['choices'][0]['message']['content']
-    else:
-        print(f"Groq response: {response.text}")
-        raise Exception(f"Groq API error: {response.status_code}")
+    """Call Groq API - DEPRECATED, keeping for future use"""
+    # Groq has deprecated all vision models as of Nov 2024
+    # This function is kept for reference but not used
+    raise Exception("Groq vision models are deprecated")
 
 def extract_event_info(base64_image):
     """Try multiple AI providers with multiple keys"""
-    providers_order = ['gemini', 'groq', 'openrouter']  # Gemini is best for vision + free tier
+    providers_order = ['gemini', 'openrouter']  # Removed groq due to deprecation
     
     for provider_name in providers_order:
         provider = AI_PROVIDERS[provider_name]
         if not provider['active']:
+            print(f"Skipping {provider_name} - disabled")
             continue
             
         for api_key in provider['keys']:
@@ -283,18 +233,16 @@ def extract_event_info(base64_image):
                     result = call_gemini(base64_image, api_key)
                 elif provider_name == 'openrouter':
                     result = call_openrouter(base64_image, api_key)
-                elif provider_name == 'groq':
-                    result = call_groq(base64_image, api_key)
                 
-                print(f"Success with {provider_name}")
+                print(f"✓ Success with {provider_name}")
                 return result
                 
             except Exception as e:
-                print(f"Failed with {provider_name}: {e}")
+                print(f"✗ Failed with {provider_name}: {e}")
                 failed_keys[provider_name].add(api_key)
                 continue
     
-    raise Exception("All AI providers failed. Please check your API keys.")
+    raise Exception("❌ All AI providers failed. Please verify:\n1. API keys are valid\n2. You have credits/quota remaining\n3. Keys are properly set in environment variables")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -310,17 +258,49 @@ def webhook():
         
         # Handle /start command
         if 'text' in message and message['text'] == '/start':
-            welcome_text = """👋 Welcome to Event Poster to Article Bot!
+            welcome_text = """👋 *Welcome to Event Poster to Article Bot!*
 
 Send me an event poster (image or PDF) and I'll convert it into a well-formatted article.
 
-Just send the image/PDF and I'll process it automatically!"""
+*How to use:*
+• Send a clear photo of the event poster
+• Or send a PDF file
+• Wait a few seconds for processing
+
+*Powered by:* Google Gemini AI
+
+Just send the image/PDF to get started! 🚀"""
             send_telegram_message(chat_id, welcome_text)
             return jsonify({'ok': True})
         
+        # Handle /help command
+        if 'text' in message and message['text'] == '/help':
+            help_text = """*Event Poster Bot Help* 📚
+
+*How it works:*
+1️⃣ Send a clear photo of an event poster
+2️⃣ Or upload a PDF file containing the poster
+3️⃣ The bot extracts all information and formats it as an article
+
+*Tips for best results:*
+• Use clear, well-lit photos
+• Ensure all text is readable
+• Avoid blurry or distorted images
+• PDF should be under 10MB
+
+*Supported formats:*
+✓ JPEG/PNG images
+✓ PDF documents (first page only)
+
+*Issues?* Make sure your image is clear and text is visible."""
+            send_telegram_message(chat_id, help_text)
+            return jsonify({'ok': True})
+        
+        base64_image = None
+        
         # Handle images
         if 'photo' in message:
-            send_telegram_message(chat_id, "📸 Processing your image...")
+            send_telegram_message(chat_id, "📸 Processing your image... Please wait.")
             file_id = message['photo'][-1]['file_id']  # Get highest resolution
             image_bytes = download_file(file_id)
             base64_image = image_to_base64(image_bytes)
@@ -329,19 +309,19 @@ Just send the image/PDF and I'll process it automatically!"""
         elif 'document' in message:
             doc = message['document']
             if doc.get('mime_type') == 'application/pdf':
-                send_telegram_message(chat_id, "📄 Processing your PDF...")
+                send_telegram_message(chat_id, "📄 Processing your PDF... This may take a moment.")
                 file_id = doc['file_id']
                 pdf_bytes = download_file(file_id)
                 base64_image = pdf_to_images(pdf_bytes)
                 
                 if not base64_image:
-                    send_telegram_message(chat_id, "❌ Failed to convert PDF. Please send an image instead.")
+                    send_telegram_message(chat_id, "❌ Failed to convert PDF. Please try:\n• Sending it as an image instead\n• Making sure PDF is not corrupted\n• Using a clearer PDF")
                     return jsonify({'ok': True})
             else:
-                send_telegram_message(chat_id, "⚠️ Please send an image or PDF file.")
+                send_telegram_message(chat_id, "⚠️ Please send an *image* (JPEG/PNG) or *PDF* file.")
                 return jsonify({'ok': True})
         else:
-            send_telegram_message(chat_id, "⚠️ Please send an event poster (image or PDF).")
+            send_telegram_message(chat_id, "⚠️ Please send an event poster:\n• As an image (photo)\n• As a PDF document\n\nUse /help for more info.")
             return jsonify({'ok': True})
         
         # Extract event information
@@ -349,10 +329,11 @@ Just send the image/PDF and I'll process it automatically!"""
             try:
                 article = extract_event_info(base64_image)
                 send_telegram_message(chat_id, article)
-                send_telegram_message(chat_id, "✅ Article generated successfully!")
+                send_telegram_message(chat_id, "✅ *Article generated successfully!*\n\nNeed another? Just send another poster!")
             except Exception as e:
-                error_msg = f"❌ Error processing image: {str(e)}\n\nPlease try again or contact support."
+                error_msg = f"❌ *Error processing image*\n\n{str(e)}\n\nPlease try:\n• Using a clearer image\n• Checking if text is readable\n• Verifying your API quota"
                 send_telegram_message(chat_id, error_msg)
+                print(f"Processing error: {e}")
         
         return jsonify({'ok': True})
         
@@ -371,10 +352,15 @@ def set_webhook():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint for monitoring and cron jobs"""
+    active_providers = {k: v['active'] for k, v in AI_PROVIDERS.items() if v['active']}
+    key_counts = {k: len([key for key in v['keys'] if key and key.strip()]) 
+                  for k, v in AI_PROVIDERS.items() if v['active']}
+    
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
-        'providers': {k: v['active'] for k, v in AI_PROVIDERS.items()}
+        'providers': active_providers,
+        'valid_keys': key_counts
     }), 200
 
 @app.route('/ping', methods=['GET'])
@@ -390,13 +376,28 @@ def keepalive():
 @app.route('/', methods=['GET'])
 def home():
     """Home endpoint"""
-    return """
-    <h1>Event Poster to Article Bot</h1>
-    <p>Bot is running! Use Telegram to interact with it.</p>
+    active_providers = [k for k, v in AI_PROVIDERS.items() if v['active']]
+    
+    return f"""
+    <h1>🤖 Event Poster to Article Bot</h1>
+    <p><strong>Status:</strong> ✅ Running</p>
+    <p><strong>Active Providers:</strong> {', '.join(active_providers)}</p>
+    
+    <h3>Quick Links:</h3>
     <ul>
-        <li><a href="/health">Health Check</a></li>
-        <li><a href="/set_webhook">Set Webhook</a></li>
+        <li><a href="/health">Health Check</a> - View system status</li>
+        <li><a href="/set_webhook">Set Webhook</a> - Configure Telegram webhook</li>
     </ul>
+    
+    <h3>How to Use:</h3>
+    <ol>
+        <li>Open Telegram and find your bot</li>
+        <li>Send /start to begin</li>
+        <li>Send an event poster image or PDF</li>
+        <li>Receive formatted article instantly!</li>
+    </ol>
+    
+    <p><em>Powered by Google Gemini AI</em></p>
     """
 
 if __name__ == '__main__':
