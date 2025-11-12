@@ -364,12 +364,22 @@ def set_webhook():
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint"""
+    """Health check endpoint for monitoring and cron jobs"""
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
         'providers': {k: v['active'] for k, v in AI_PROVIDERS.items()}
-    })
+    }), 200
+
+@app.route('/ping', methods=['GET'])
+def ping():
+    """Simple ping endpoint to keep app awake"""
+    return jsonify({'status': 'ok', 'time': datetime.utcnow().isoformat()}), 200
+
+@app.route('/keepalive', methods=['GET'])
+def keepalive():
+    """Keep-alive endpoint for cron jobs (prevents Render sleep)"""
+    return "OK", 200
 
 @app.route('/', methods=['GET'])
 def home():
